@@ -1,0 +1,39 @@
+name: Build the app & deploy it to the server
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+jobs:
+  deploy_themes:
+    runs-on: ubuntu-latest
+    steps:
+      # This action gets all files from the repository, to be sent to and built on the host. 
+      - name: Get Files from repository
+        uses: actions/checkout@v2
+
+      # We use this action to install the SSH private key to later connect to the server.
+      - name: Install SSH Key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
+          known_hosts: 'just-a-placeholder-so-we-dont-get-errors'
+
+      # In order for the ubuntu-latest runner to setup a connection, the Host must be added
+      # to the known_hosts file. If this doesn't happen, the connection cannot be made.
+      - name: Adding Known Hosts
+        run: ssh-keyscan -H ${{ secrets.CI_SERVER }} >> ~/.ssh/known_hosts
+
+      # Deploying theme files with Rsync to remote host.
+      # Make sure to add all files to be excluded to a file named '.deployignore' in the root
+      # directory. Where every exclude rule is on a new line.
+      - name: Deploy with rsync
+        run: |
+          mv theme ${{ secrets.THEME_NAME }}
+          rsync -avz . --exclude-from '.deployignore' ${{ secrets.CI_USER }}@${{ secrets.CI_SERVER }}:${{ secrets.STAGING_CI_THEME_PATH }}
+      # Running the remote command to run PHP composer on the host. This command is specific for Plesk hosts running on CentOS.
+      # Make sure to properly specify the working directory, else it might not work and the deployment will not be successful.
+      - name: Run PHP Composer on the host
+        run: ssh ${{ secrets.CI_USER }}@${{ secrets.CI_SERVER }} "/opt/plesk/php/7.4/bin/php /usr/lib64/plesk-9.0/composer.phar install --working-dir=${{ secrets.STAGING_CI_THEME_PATH }}/${{ secrets.THEME_NAME }}"
